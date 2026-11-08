@@ -25,8 +25,10 @@ export function TariffField({ value, onChange }) {
       </div>
       <p className="hint" id={`${id}-hint`}>
         {tariff
-          ? `${tariff.description}. Printed on the bill as ${tariff.printedAs}.`
-          : 'Hotels, government, 11 kV supplies and other tariffs: type the rates from the bill below.'}
+          ? `${tariff.description}. Printed on the bill as ${tariff.printedAs}.${
+              tariff.rates ? '' : ' Its rates aren’t built in yet, so type them from the bill.'
+            }`
+          : 'Hotels, government and other tariffs: type the rates from the bill below.'}
       </p>
     </div>
   );
@@ -35,11 +37,12 @@ export function TariffField({ value, onChange }) {
 // Where the rates in the table came from, and a way back to them once any is changed.
 export function RatesNote({ values, onRestore }) {
   const tariff = findTariff(values.tariff);
-  const edited = tariff && !ratesMatchTariff(values);
+  const listed = Boolean(tariff?.rates);
+  const edited = listed && !ratesMatchTariff(values);
   return (
     <p className="fieldset-note" aria-live="polite">
-      {!tariff && 'Type the rates printed on the bill.'}
-      {tariff && !edited && `${tariff.id} rates in force from ${tariff.effective}. Change any that differ on the bill.`}
+      {!listed && `Type the ${tariff ? `${tariff.id} ` : ''}rates printed on the bill.`}
+      {listed && !edited && `${tariff.id} rates in force from ${tariff.effective}. Change any that differ on the bill.`}
       {edited && (
         <>
           Changed from the {tariff.id} tariff.{' '}

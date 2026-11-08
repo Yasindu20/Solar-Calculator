@@ -15,6 +15,15 @@ export function splitPayback(months) {
   return { years: Math.floor(total / 12), months: total % 12, exactMonths: months };
 }
 
+// CO2 avoided by the solar units, and the trees that would absorb as much.
+export function cleanEnergy(generation) {
+  const annualGeneration = generation * 12;
+  const co2PerYearKg = annualGeneration * assumptions.co2KgPerUnit;
+  const co2TotalKg = co2PerYearKg * assumptions.projectionYears;
+  const treesEquivalent = co2PerYearKg / assumptions.co2KgPerTreePerYear;
+  return { annualGeneration, co2PerYearKg, co2TotalKg, treesEquivalent };
+}
+
 // Everything that follows from a steady monthly benefit: 1, 10 and 20-year totals, annual ROI,
 // payback, the yearly cash position and the clean-energy estimate. Shared by both calculators.
 export function projection({ monthlyBenefit, investment, generation }) {
@@ -33,11 +42,6 @@ export function projection({ monthlyBenefit, investment, generation }) {
   const cumulative = Array.from({ length: years + 1 }, (_, y) => yearIncome * y - investment);
   const netGain = yearIncome * years - investment;
 
-  const annualGeneration = generation * 12;
-  const co2PerYearKg = annualGeneration * assumptions.co2KgPerUnit;
-  const co2TotalKg = co2PerYearKg * years;
-  const treesEquivalent = co2PerYearKg / assumptions.co2KgPerTreePerYear;
-
   return {
     generation,
     investment,
@@ -53,10 +57,7 @@ export function projection({ monthlyBenefit, investment, generation }) {
     years,
     cumulative,
     netGain,
-    annualGeneration,
-    co2PerYearKg,
-    co2TotalKg,
-    treesEquivalent,
+    ...cleanEnergy(generation),
   };
 }
 

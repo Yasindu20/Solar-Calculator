@@ -32,14 +32,16 @@ export const assumptions = {
   showCleanEnergy: true,
 };
 
-// The figures the time-of-use calculator opens with: a made-up GP-2 business. Rates come
-// from the tariff (src/config/tariffs.js) and generation from the system size.
+// The figures the time-of-use calculator opens with: a made-up GP-2 business. Rates come from
+// the tariff (src/config/tariffs.js), generation from the system size, and the battery starts at
+// the size suggested for the peak use, priced from batteryDefaults.pricePerKwh.
 export const touExample = {
   tariff: 'GP-2',
   units: { day: '8,000', peak: '6,000', offPeak: '3,000' },
   maxDemand: '100',
   systemSize: '50',
-  investment: '7,500,000',
+  solarCost: '7,500,000',
+  battery: true,
 };
 
 // The figures the standard calculator opens with (same as the previous calculator).

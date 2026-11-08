@@ -21,6 +21,7 @@ import {
 } from '../format.js';
 import { cashScale } from '../chart.js';
 import { benefitNoun } from '../touCalc.js';
+import { batteryStory } from '../batteryStory.js';
 
 const PAGE_W = 210;
 const PAGE_H = 297;
@@ -201,11 +202,21 @@ export function drawReport(doc, { kind = 'standard', results: r, details = {}, n
 
   let y = TILE_Y + TILE_H + 13;
   if (tou) {
+    // Page 1: the bill, the saving and how the battery runs
     y = drawTouBill(doc, p, r, y);
-    y = drawTouBenefit(doc, p, r, y + 4);
-    y = drawCashChart(doc, p, r, y + 8, 28);
-    y = drawTotals(doc, p, r, y + 4, { h: 18, noun: benefitNoun(r) });
-    drawNotes(doc, p, r, y + 5, touNote(r));
+    y = drawTouSavings(doc, p, r, y + 9);
+    if (r.battery.on) y = drawBatteryDay(doc, p, r, y + 9);
+    drawUnitsBars(doc, p, r, y + 9);
+    drawFooter(doc, p);
+
+    // Page 2: the investment
+    doc.addPage();
+    drawPageBand(doc, p, now, logo, 'Solar investment report · investment and returns');
+    y = drawReturnsFacts(doc, p, r, 33);
+    y = drawCashChart(doc, p, r, y + 9, 42);
+    y = drawMilestones(doc, p, r, y + 4);
+    y = drawYearTable(doc, p, r, y + 10);
+    drawAssumptions(doc, p, r, details, y + 8);
   } else {
     y = drawMonthly(doc, p, r, y);
     y = drawCashChart(doc, p, r, y + 10);
@@ -288,14 +299,19 @@ function drawHeader(doc, p, r, details, now, logo, tou) {
     ], M, 59.5);
   } else {
     doc.text(
-      tou ? 'Savings and payback for solar on a time-of-use electricity bill' : 'Savings, income and payback for your rooftop solar system',
+      tou
+        ? r.battery.on
+          ? 'Savings and payback for solar and battery storage on a time-of-use bill'
+          : 'Savings and payback for solar on a time-of-use electricity bill'
+        : 'Savings, income and payback for your rooftop solar system',
       M,
       59.5,
     );
   }
   const facts = [];
   if (location) facts.push(location);
-  if (size) facts.push(`${size.replace(/\s*kwp?$/i, '')} kWp system`);
+  if (size) facts.push(`${size.replace(/\s*kwp?$/i, '')} kWp ${tou ? 'solar' : 'system'}`);
+  if (tou && r.battery.on) facts.push(`${qty(r.battery.capacity)} kWh battery`);
   if (tou && details.tariff) facts.push(`${details.tariff} tariff`);
   if (facts.length) {
     let fx = M;
@@ -390,7 +406,13 @@ function drawTiles(doc, p, r, tou) {
       ? {
           label: `Monthly ${benefitNoun(r)}`,
           value: rs(r.totalMonthlyIncome),
-          note: r.netPlus ? 'Every unit sold under Net Plus' : r.soldUnits > 0 ? 'Bill saved plus surplus sold' : 'Taken off the electricity bill',
+          note: r.battery.on
+            ? 'Solar plus battery, after charging costs'
+            : r.netPlus
+              ? 'Every unit sold under Net Plus'
+              : r.soldUnits > 0
+                ? 'Bill saved plus surplus sold'
+                : 'Taken off the electricity bill',
         }
       : {
           label: 'Monthly benefit',
@@ -553,96 +575,416 @@ const TOU_LINES = [
   { key: 'fixed', label: 'Fixed charge' },
 ];
 
-// The bill laid out like a CEB/EDL or LECO bill: today on the left, with solar on the right.
-function drawTouBill(doc, p, r, top) {
-  const after = r.netPlus ? 'With Net Plus' : 'With solar';
-  sectionTitle(doc, p, `Your monthly bill, today and ${r.netPlus ? 'with Net Plus' : 'with solar'}`, M, top);
+// Lines that solar or the battery bring down are green; lines that go up (overnight charging) are orange.
+function changeColour(base, value) {
+  if (value < base - 0.004) return C.tea700;
+  if (value > base + 0.004) return C.thambili800;
+  return null;
+}
 
-  // right edges of the number columns
-  const col = { rate: M + 68, u1: M + 94, a1: M + 122, u2: M + 150, a2: PAGE_W - M };
+// The bill laid out like a CEB/EDL or LECO bill: today, with solar, and with solar and a battery.
+function drawTouBill(doc, p, r, top) {
+  const battery = r.battery.on;
+  const groups = [
+    { label: 'Today', bill: r.today },
+    { label: r.netPlus ? 'With Net Plus' : 'With solar', bill: r.withSolar },
+  ];
+  if (battery) groups.push({ label: 'Solar + battery', bill: r.withBattery });
+  sectionTitle(
+    doc,
+    p,
+    battery ? 'Your monthly bill: today, with solar, and with a battery' : `Your monthly bill, today and ${r.netPlus ? 'with Net Plus' : 'with solar'}`,
+    M,
+    top,
+  );
+
+  // Right edges of the columns. Each group is a units column and an amount column.
+  const unitsW = battery ? 17 : 22;
+  const amountW = battery ? 23 : 28;
+  const right = PAGE_W - M;
+  const cols = groups.map((grp, i) => {
+    const amount = right - (groups.length - 1 - i) * (unitsW + amountW);
+    return { ...grp, amount, units: amount - amountW };
+  });
+  const rateX = cols[0].units - unitsW - 3;
   const rule = (y, color = C.line, w = 0.2) => {
     p.stroke(color).width(w);
-    doc.line(M, y, PAGE_W - M, y);
+    doc.line(M, y, right, y);
   };
 
-  let y = top + 7.6;
-  p.font('medium', 7.4).color(C.slate600);
+  let y = top + 7.2;
+  p.font('semibold', 7.8).color(C.ink);
+  for (const c of cols) doc.text(c.label, c.amount, y, { align: 'right' });
+  y += 3.8;
+  p.font('medium', 7).color(C.slate600);
   doc.text('Charge', M, y);
-  doc.text('Rate (Rs.)', col.rate, y, { align: 'right' });
-  doc.text('Units', col.u1, y, { align: 'right' });
-  doc.text('Today (Rs.)', col.a1, y, { align: 'right' });
-  doc.text('Units', col.u2, y, { align: 'right' });
-  doc.text(`${after} (Rs.)`, col.a2, y, { align: 'right' });
-  rule(y + 2, C.line, 0.25);
+  doc.text('Rate (Rs.)', rateX, y, { align: 'right' });
+  for (const c of cols) {
+    doc.text('Units', c.units, y, { align: 'right' });
+    doc.text('Rs.', c.amount, y, { align: 'right' });
+  }
+  rule(y + 1.8, C.line, 0.25);
 
-  const pitch = 5.5;
-  const row = (label, when, a, b, unit = '') => {
+  const pitch = 5.2;
+  const line = (label, when, key, rateText, unit = '') => {
     y += pitch;
     runs(doc, p, [
-      { text: label, font: 'semibold', size: 8.4, color: C.ink, gap: when ? 1.6 : 0 },
-      ...(when ? [{ text: when, font: 'regular', size: 7.2, color: C.slate600 }] : []),
+      { text: label, font: 'semibold', size: 8.2, color: C.ink, gap: when ? 1.4 : 0 },
+      ...(when ? [{ text: when, font: 'regular', size: 6.9, color: C.slate600 }] : []),
     ], M, y);
-    p.font('regular', 8.4).color(C.ink);
-    if (a.rate != null) doc.text(formatTyped(a.rate, 2), col.rate, y, { align: 'right' });
-    if (a.quantity != null) doc.text(`${qty(a.quantity)}${unit}`, col.u1, y, { align: 'right' });
-    doc.text(num(a.amount), col.a1, y, { align: 'right' });
-    const changed = Math.abs(a.amount - b.amount) > 0.004;
-    p.font(changed ? 'semibold' : 'regular', 8.4).color(changed ? C.tea700 : C.ink);
-    if (b.quantity != null) doc.text(`${qty(b.quantity)}${unit}`, col.u2, y, { align: 'right' });
-    doc.text(num(b.amount), col.a2, y, { align: 'right' });
-    rule(y + 2);
+    p.font('regular', 8.2).color(C.ink);
+    if (rateText) doc.text(rateText, rateX, y, { align: 'right' });
+    const base = key === 'levy' ? r.today.levy : r.today.lines[key].amount;
+    for (const c of cols) {
+      const item = key === 'levy' ? { amount: c.bill.levy, quantity: null } : c.bill.lines[key];
+      const colour = c.bill === r.today ? null : changeColour(base, item.amount);
+      p.font(colour ? 'semibold' : 'regular', 8.2).color(colour ?? C.ink);
+      if (item.quantity != null) {
+        const q = key === 'demand' ? item.quantity : Math.round(item.quantity);
+        doc.text(`${qty(q)}${unit}`, c.units, y, { align: 'right' });
+      }
+      doc.text(num(item.amount), c.amount, y, { align: 'right' });
+    }
+    rule(y + 1.9);
   };
 
-  for (const line of TOU_LINES) {
-    row(line.label, line.when, r.today.lines[line.key], r.withSolar.lines[line.key], line.unit);
+  for (const l of TOU_LINES) {
+    const rate = r.today.lines[l.key].rate;
+    line(l.label, l.when, l.key, rate == null ? '' : formatTyped(rate, 2), l.unit);
   }
-  if (r.sscl) {
-    row('SSC Levy', '2.5% of the total', { amount: r.today.levy }, { amount: r.withSolar.levy });
-  }
+  if (r.sscl) line('SSC Levy', '2.5% of the total', 'levy', '');
 
-  y += 7;
-  p.font('semibold', 9.2).color(C.sapphire900);
+  y += 6.6;
+  p.font('semibold', 9).color(C.sapphire900);
   doc.text('Monthly bill', M, y);
-  p.font('display', 12.5).color(C.sapphire900);
-  doc.text(rs(r.today.total), col.a1, y, { align: 'right' });
-  p.color(r.billSaving > 0 ? C.tea700 : C.sapphire900);
-  doc.text(rs(r.withSolar.total), col.a2, y, { align: 'right' });
-
+  for (const c of cols) {
+    const colour = c.bill === r.today ? null : changeColour(r.today.total, c.bill.total);
+    p.font('display', battery ? 11 : 12.5).color(colour ?? C.sapphire900);
+    doc.text(rs(c.bill.total), c.amount, y, { align: 'right' });
+  }
   return y + 2;
 }
 
-// How the monthly figure adds up, with the figure itself in a dark box.
-function drawTouBenefit(doc, p, r, top) {
+// Where the monthly saving comes from, with the total in a dark box.
+function drawTouSavings(doc, p, r, top) {
+  const b = r.battery;
   const noun = benefitNoun(r);
-  const boxW = 76;
-  const boxH = 10;
-  const bx = PAGE_W - M - boxW;
-  p.fill(C.sapphire900);
-  doc.roundedRect(bx, top, boxW, boxH, 2, 2, 'F');
-  p.font('semibold', 8.6).color(C.sapphire300);
-  doc.text(`Monthly ${noun}`, bx + 4, top + 6.3);
-  p.font('display', 13).color(C.paper);
-  doc.text(rs(r.totalMonthlyIncome), bx + boxW - 4, top + 6.7, { align: 'right' });
-
-  let text;
-  if (r.netPlus) {
-    text = `All ${units(r.soldUnits)} a month are sold at ${rsRate(r.exportRate)} under Net Plus, so the bill stays the same.`;
-  } else {
-    text = `Bill saved: ${rs(r.billSaving)}, from ${units(r.solarToDay)} of Day use replaced by solar.`;
-    if (r.soldUnits > 0) text += ` Surplus sold: ${rs(r.solarIncome)} (${units(r.soldUnits)} × ${rsRate(r.exportRate)}).`;
-    text += ' Panels only produce in daylight, so Peak and Off-peak units stay on the bill.';
+  const rows = [];
+  rows.push([r.netPlus ? 'Solar: bill saved' : 'Solar: Day units replaced', rs(r.billSaving)]);
+  if (r.netPlus || r.soldUnits > 0) rows.push([r.netPlus ? 'Solar: units sold (Net Plus)' : 'Solar: surplus sold', rs(r.solarIncome)]);
+  if (b.on) {
+    if (b.plan.peak > 0) rows.push([`Battery: ${units(b.plan.peak)} of Peak replaced`, rs(b.parts.peak)]);
+    if (b.plan.offPeak > 0) rows.push([`Battery: ${units(b.plan.offPeak)} of Off-peak replaced`, rs(b.parts.offPeak)]);
+    rows.push(
+      b.demandCounted > 0
+        ? [`Battery: max demand, ${qty(b.demandCounted)} kVA (confirmed)`, rs(b.parts.demand)]
+        : ['Battery: max demand', 'not counted', 'muted'],
+    );
+    if (b.plan.chargedIn > 0) rows.push([`Battery: charging cost, ${units(b.plan.chargedIn)} put in`, rs(-b.parts.charging), 'cost']);
   }
-  p.font('regular', 7.8).color(C.slate600);
-  const lines = doc.splitTextToSize(text, CONTENT_W - boxW - 8);
-  doc.text(lines.slice(0, 3), M, top + 3.6, { lineHeightFactor: 1.3 });
-  return top + boxH;
+
+  sectionTitle(doc, p, `Your monthly ${noun}`, M, top);
+  const boxW = 66;
+  const listW = CONTENT_W - boxW - 10;
+  const pitch = 4.5;
+  let y = top + 6.5;
+  for (const [label, value, kind] of rows) {
+    p.font('regular', 7.9).color(C.slate600);
+    doc.text(label, M, y);
+    p.font(kind === 'muted' ? 'regular' : 'semibold', 7.9).color(kind === 'cost' ? C.thambili800 : kind === 'muted' ? C.slate600 : C.ink);
+    doc.text(value, M + listW, y, { align: 'right' });
+    y += pitch;
+  }
+
+  const boxH = Math.max(14, rows.length * pitch + 1);
+  const bx = PAGE_W - M - boxW;
+  const by = top + 3;
+  p.fill(C.sapphire900);
+  doc.roundedRect(bx, by, boxW, boxH, 2.2, 2.2, 'F');
+  p.font('semibold', 8.4).color(C.sapphire300);
+  doc.text(`Total monthly ${noun}`, bx + 5, by + boxH / 2 - 1.6);
+  p.font('display', 15).color(C.paper);
+  doc.text(rs(r.totalMonthlyIncome), bx + 5, by + boxH / 2 + 5);
+  if (r.sscl) {
+    p.font('regular', 6.6).color(C.slate600);
+    doc.text('Amounts include the 2.5% SSC Levy.', M, y + 0.4);
+  }
+  return Math.max(y + 1, by + boxH);
 }
 
-function touNote(r) {
-  const solar = r.netPlus
-    ? `Solar generation taken as ${units(r.generation)} a month, all sold under Net Plus.`
-    : `Solar generation taken as ${units(r.generation)} a month, set off against Day units; max demand and the fixed charge stay the same.`;
-  return `Estimates from the bill figures shown, assuming the same units and rates every month with no panel ageing or tariff changes. ${solar} Results depend on weather, system performance, consumption and tariff revisions.`;
+// The battery's day in four moments.
+function drawBatteryDay(doc, p, r, top) {
+  sectionTitle(doc, p, 'How the battery runs each day', M, top);
+  const steps = batteryStory(r);
+  const gap = 4;
+  const w = (CONTENT_W - gap * 3) / 4;
+  const h = 27;
+  const by = top + 4;
+  const NAMES = { sun: 'Solar', grid: 'Grid', battery: 'Battery', site: 'Site' };
+  steps.forEach((s, i) => {
+    const x = M + i * (w + gap);
+    p.fill(C.mist);
+    doc.roundedRect(x, by, w, h, 2, 2, 'F');
+    runs(doc, p, [
+      { text: s.title, font: 'semibold', size: 8, color: C.ink, gap: 1.4 },
+      { text: s.when, font: 'regular', size: 6.6, color: C.slate600 },
+    ], x + 3, by + 5);
+    let ty = by + 9.4;
+    for (const f of s.flows.filter((fl) => fl.on)) {
+      // "Grid → Battery", with the arrow drawn (the report font has no arrow glyph)
+      p.font('semibold', 6.8).color(C.thambili800);
+      const from = NAMES[f.from];
+      doc.text(from, x + 3, ty);
+      const ax = x + 3 + doc.getTextWidth(from) + 1.2;
+      p.stroke(C.thambili800).width(0.3);
+      doc.line(ax, ty - 0.85, ax + 3, ty - 0.85);
+      p.fill(C.thambili800);
+      doc.triangle(ax + 2.8, ty - 1.75, ax + 4.3, ty - 0.85, ax + 2.8, ty + 0.05, 'F');
+      doc.text(NAMES[f.to], ax + 5.4, ty);
+      ty += 3.1;
+    }
+    p.font('regular', 6.8).color(C.ink);
+    const lines = doc.splitTextToSize(s.text, w - 6);
+    doc.text(lines.slice(0, 4), x + 3, ty + 0.6, { lineHeightFactor: 1.25 });
+  });
+  return by + h;
+}
+
+// One bar per period: what solar, the battery and the grid each supply.
+function drawUnitsBars(doc, p, r, top) {
+  const b = r.battery;
+  const pl = b.plan;
+  const solarOnDay = r.netPlus ? 0 : Math.max(0, r.solarToDay - (b.on ? pl.charge.daySolar : 0));
+  const rows = [
+    ['Day', [['own', solarOnDay], ['grid', r.withBattery.lines.day.quantity]]],
+    ['Peak', [['battery', b.on ? pl.peak : 0], ['grid', r.peakUnits - (b.on ? pl.peak : 0)]]],
+    ['Off-peak', [['battery', b.on ? pl.offPeak : 0], ['grid', r.offPeakUnits - (b.on ? pl.offPeak : 0)]]],
+  ];
+  if (b.on && pl.chargedIn > 0) rows.push(['Charging', [['own', pl.charge.surplus + pl.charge.daySolar], ['grid', pl.charge.grid]]]);
+  const sold = r.netPlus ? r.soldUnits : Math.max(0, r.soldUnits - (b.on ? pl.charge.surplus : 0));
+  if (sold > 0) rows.push([r.netPlus ? 'Sold' : 'Surplus', [['sold', sold]]]);
+
+  const colours = { own: C.sapphire600, battery: C.thambili600, grid: C.slate400, sold: C.tea700 };
+  const names = { own: 'From solar', battery: 'From the battery', grid: 'From the grid', sold: 'Sold to the grid' };
+  sectionTitle(doc, p, 'Units by time of day', M, top);
+
+  // legend, right-aligned on the title line
+  const used = new Set(rows.flatMap(([, parts]) => parts.filter(([, v]) => v > 0.5).map(([k]) => k)));
+  let lx = PAGE_W - M;
+  p.font('regular', 7.4);
+  for (const kind of ['sold', 'grid', 'battery', 'own'].filter((k) => used.has(k))) {
+    const label = names[kind];
+    const tw = doc.getTextWidth(label);
+    p.color(C.slate600);
+    doc.text(label, lx, top, { align: 'right' });
+    p.fill(colours[kind]);
+    doc.roundedRect(lx - tw - 3.8, top - 2.4, 2.6, 2.6, 0.5, 0.5, 'F');
+    lx -= tw + 3.8 + 4.5;
+  }
+
+  const labelW = 20;
+  const valueW = 16;
+  const trackW = CONTENT_W - labelW - valueW;
+  const totals = rows.map(([, parts]) => parts.reduce((sum, [, v]) => sum + v, 0));
+  const max = Math.max(1, ...totals);
+  let y = top + 5;
+  rows.forEach(([label, parts], i) => {
+    p.font('semibold', 7.8).color(C.ink);
+    doc.text(label, M, y + 2.6);
+    let x = M + labelW;
+    const full = (totals[i] / max) * trackW;
+    const shown = parts.filter(([, v]) => v > 0.5);
+    shown.forEach(([kind, v], j) => {
+      const w = Math.max(0.6, (v / totals[i]) * full - (j < shown.length - 1 ? 0.5 : 0));
+      p.fill(colours[kind]);
+      doc.rect(x, y, w, 3.4, 'F');
+      x += w + 0.5;
+    });
+    p.font('semibold', 7.8).color(C.ink);
+    doc.text(qty(Math.round(totals[i])), PAGE_W - M, y + 2.6, { align: 'right' });
+    y += 5.2;
+  });
+  return y;
+}
+
+// ------------------------------------------------- page 2: investment
+
+// A slim version of the page-one band for the following pages.
+function drawPageBand(doc, p, now, logo, title) {
+  const h = 22;
+  p.fill(C.sapphire900);
+  doc.rect(0, 0, PAGE_W, h, 'F');
+  let x = M;
+  if (logo) {
+    const lh = 9;
+    const lw = Math.min(30, lh * logo.aspect);
+    doc.addImage(logo.dataUrl, 'PNG', M, (h - lh) / 2, lw, lh, 'brand-logo', 'SLOW');
+    x = M + lw + 3.5;
+  } else {
+    drawEmblem(doc, p, M, 6, 9);
+    x = M + 12;
+  }
+  p.font('display', 11).color(C.paper);
+  doc.text(company.name, x, 10);
+  p.font('regular', 7.6).color(C.sapphire300);
+  doc.text(title, x, 14.6);
+  p.font('medium', 8).color(C.paper);
+  doc.text(reportNumber(now), PAGE_W - M, 10, { align: 'right' });
+  p.font('regular', 7.4).color(C.sapphire300);
+  doc.text(formatDate(now), PAGE_W - M, 14.6, { align: 'right' });
+}
+
+// Four figures that sum up the investment.
+function drawReturnsFacts(doc, p, r, top) {
+  sectionTitle(doc, p, 'Investment and returns', M, top);
+  const cells = [
+    { label: 'Total investment', value: rs(r.investment) },
+    { label: 'Net saving, first year', value: rs(r.firstYearNet) },
+    { label: 'Simple payback', value: r.simplePaybackYears == null ? '—' : `${formatTyped(Math.round(r.simplePaybackYears * 10) / 10, 'auto')} years` },
+    { label: `Net present value at ${formatTyped(r.discountRate * 100, 'auto')}%`, value: rs(r.npv), colour: r.npv < 0 ? C.thambili800 : C.sapphire900 },
+  ];
+  const h = 17;
+  const by = top + 4;
+  p.fill(C.mist);
+  doc.roundedRect(M, by, CONTENT_W, h, 2.6, 2.6, 'F');
+  const cw = CONTENT_W / cells.length;
+  cells.forEach((cell, i) => {
+    const x = M + cw * i + 5;
+    if (i > 0) {
+      p.stroke(C.line).width(0.25);
+      doc.line(M + cw * i, by + 3.5, M + cw * i, by + h - 3.5);
+    }
+    p.font('medium', 7.6).color(C.slate600);
+    doc.text(cell.label, x, by + 6);
+    const size = fitSize(doc, p, 'display', cell.value, 14, cw - 9, 10);
+    p.font('display', size).color(cell.colour ?? C.sapphire900);
+    doc.text(cell.value, x, by + 12.6);
+  });
+
+  const parts = [`Solar ${rs(r.costs.solar)}`];
+  if (r.battery.on) parts.push(`battery ${rs(r.costs.battery)}`);
+  if (r.costs.other > 0) parts.push(`other ${rs(r.costs.other)}`);
+  let text = `${parts.join(' + ')}. Maintenance ${rs(r.maintenance)} a year.`;
+  if (r.replacementYears.length) {
+    text += ` Battery replaced in year ${r.replacementYears.join(' and ')} for ${rs(r.finance.replacement * r.costs.battery)}.`;
+  }
+  p.font('regular', 7.8).color(C.slate600);
+  doc.text(text, M, by + h + 5);
+  return by + h + 6;
+}
+
+// Where the customer stands after 5, 10, 15 and 20 years.
+function drawMilestones(doc, p, r, top) {
+  const h = 17;
+  p.fill(C.mist);
+  doc.roundedRect(M, top, CONTENT_W, h, 2.6, 2.6, 'F');
+  const cw = CONTENT_W / r.milestones.length;
+  r.milestones.forEach((m, i) => {
+    const x = M + cw * i + 5;
+    if (i > 0) {
+      p.stroke(C.line).width(0.25);
+      doc.line(M + cw * i, top + 3.5, M + cw * i, top + h - 3.5);
+    }
+    p.font('medium', 7.6).color(C.slate600);
+    doc.text(`After ${m.year} years`, x, top + 6);
+    const value = rs(m.position);
+    const size = fitSize(doc, p, 'display', value, 14, cw - 9, 10);
+    p.font('display', size).color(m.position >= 0 ? C.tea600 : C.sapphire900);
+    doc.text(value, x, top + 12.6);
+  });
+  return top + h;
+}
+
+// Twenty years in two side-by-side tables.
+function drawYearTable(doc, p, r, top) {
+  sectionTitle(doc, p, 'Year by year', M, top);
+  const half = Math.ceil(r.yearly.length / 2);
+  const colW = (CONTENT_W - 10) / 2;
+  [r.yearly.slice(0, half), r.yearly.slice(half)].forEach((rows, t) => {
+    const x = M + t * (colW + 10);
+    let y = top + 6;
+    p.font('medium', 7).color(C.slate600);
+    doc.text('Year', x, y);
+    doc.text('Saving', x + colW * 0.42, y, { align: 'right' });
+    doc.text('Costs', x + colW * 0.66, y, { align: 'right' });
+    doc.text('Position', x + colW, y, { align: 'right' });
+    p.stroke(C.line).width(0.25);
+    doc.line(x, y + 1.6, x + colW, y + 1.6);
+    for (const row of rows) {
+      y += 4.3;
+      p.font('regular', 7.6).color(C.ink);
+      doc.text(String(row.year), x, y);
+      doc.text(num(row.saving), x + colW * 0.42, y, { align: 'right' });
+      const costs = row.maintenance + row.replacement;
+      p.color(row.replacement > 0 ? C.thambili800 : C.ink);
+      doc.text(`${costs > 0 ? '−' : ''}${num(costs)}${row.replacement > 0 ? '*' : ''}`, x + colW * 0.66, y, { align: 'right' });
+      p.font('semibold', 7.6).color(row.position >= 0 ? C.tea700 : C.ink);
+      doc.text(num(row.position), x + colW, y, { align: 'right' });
+    }
+  });
+  let y = top + 6 + half * 4.3 + 4.6;
+  p.font('regular', 6.8).color(C.slate600);
+  const foot = `Amounts in Rs. Saving is after panel${r.battery.on ? ' and battery' : ''} ageing; costs are maintenance${
+    r.replacementYears.length ? ' and, marked *, the battery replacement' : ''
+  }; position is where the customer stands after paying for the system.`;
+  doc.text(foot, M, y);
+  return y + 1;
+}
+
+// What the figures assume, as a short list.
+function drawAssumptions(doc, p, r, details, top) {
+  sectionTitle(doc, p, 'What these figures assume', M, top);
+  const b = r.battery;
+  const pct = (share) => `${formatTyped(Math.round(share * 1000) / 10, 'auto')}%`;
+  const items = [];
+  items.push(
+    `The bill: the units and rates shown${details.tariff ? ` (${details.tariff} tariff)` : ''}, the same every month${
+      r.sscl ? ', with the 2.5% SSC Levy' : ''
+    }. Tariff revisions are not included.`,
+  );
+  items.push(
+    r.netPlus
+      ? `Solar: ${units(r.generation)} a month, all sold under Net Plus at ${rsRate(r.exportRate)}; output falls ${pct(r.finance.solarLoss)} a year.`
+      : `Solar: ${units(r.generation)} a month, set off against Day units${r.soldUnits > 0 ? `, surplus paid at ${rsRate(r.exportRate)}` : ''}; output falls ${pct(r.finance.solarLoss)} a year.`,
+  );
+  if (b.on) {
+    const modes = { smart: 'smart (most profitable use)', peak: 'peak hours', offPeak: 'off-peak hours', demand: 'maximum demand' };
+    const sources = { both: 'solar and grid', solar: 'solar only', grid: 'grid only' };
+    items.push(
+      `Battery: ${qty(b.capacity)} kWh with a ${qty(b.power)} kW inverter, ${pct(b.usable)} usable, ${pct(b.efficiency)} round trip, one cycle a day (${qty(b.days)} a month); used for ${modes[b.mode]}, charged from ${sources[b.charging]}.`,
+    );
+    items.push(
+      'Charging is a cost: grid units overnight at the Off-peak rate, and solar put into the battery no longer replaces Day units or earns its export payment, so no unit is counted twice.',
+    );
+    items.push(
+      b.demandCounted > 0
+        ? `Maximum demand: a ${qty(b.demandCounted)} kVA reduction is counted, confirmed from half-hourly load data.`
+        : 'Maximum demand: no saving is counted. A battery only lowers the kVA charge when half-hourly load data shows it can hold the peak down.',
+    );
+    items.push(
+      `Battery ageing: capacity falls ${pct(r.finance.batteryLoss)} a year; replaced after ${r.finance.batteryLife} years at ${pct(r.finance.replacement)} of today’s price.`,
+    );
+  }
+  items.push(
+    `Maintenance ${pct(r.finance.maintenance)} of the investment a year. Net present value discounts each year at ${pct(r.discountRate)}. Battery figures are estimates from monthly bill units, to be confirmed by a site survey.`,
+  );
+  if (assumptions.showCleanEnergy && r.generation > 0) {
+    items.push(
+      `Clean energy: about ${tonnes(r.co2PerYearKg)} tonnes of CO2 avoided each year (${assumptions.co2KgPerUnit} kg per solar unit), as much as ${num(r.treesEquivalent)} mature trees absorb.`,
+    );
+  }
+
+  let y = top + 6;
+  p.font('regular', 7.3);
+  for (const item of items) {
+    const lines = doc.splitTextToSize(item, CONTENT_W - 4);
+    p.fill(C.thambili500);
+    doc.circle(M + 0.9, y - 1, 0.6, 'F');
+    p.color(C.ink);
+    doc.text(lines, M + 4, y, { lineHeightFactor: 1.3 });
+    y += lines.length * 3.3 + 1.2;
+  }
+  return y;
 }
 
 // ------------------------------------------------------------ cash chart

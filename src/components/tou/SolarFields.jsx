@@ -1,7 +1,7 @@
-import { useId } from 'react';
 import { touSettings } from '../../config/tariffs.js';
 import { formatTyped, qty, rs, rsRate } from '../../lib/format.js';
 import { NumberField } from '../NumberField.jsx';
+import { ChoiceCards } from './Choices.jsx';
 
 // A system size people would actually quote: whole kWp, or one decimal for small systems.
 export function roundSize(kwp) {
@@ -13,30 +13,7 @@ const SCHEMES = [
   { value: 'netplus', title: 'Sell it all (Net Plus)', text: 'Every unit is sold to the grid. The bill stays the same.' },
 ];
 
-function SchemeChoice({ value, onChange }) {
-  const name = useId();
-  const labelId = `${name}-label`;
-  return (
-    <div className="field">
-      <p className="field-label" id={labelId}>
-        How the solar is used
-      </p>
-      <div className="choice" role="radiogroup" aria-labelledby={labelId}>
-        {SCHEMES.map((s) => (
-          <label key={s.value} className={`choice-card${value === s.value ? ' is-on' : ''}`}>
-            <input type="radio" name={name} value={s.value} checked={value === s.value} onChange={() => onChange(s.value)} />
-            <span className="choice-body">
-              <strong>{s.title}</strong>
-              <small>{s.text}</small>
-            </span>
-          </label>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SunIcon() {
+export function SunIcon() {
   return (
     <svg className="advice-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <circle cx="12" cy="12" r="4.2" />
@@ -121,7 +98,7 @@ export function SolarFields({ values, results: r, set, onSize }) {
 
       <SizeAdvice r={r} onUseSize={(kwp) => onSize(formatTyped(kwp, 'auto'))} />
 
-      <SchemeChoice value={values.scheme} onChange={set('scheme')} />
+      <ChoiceCards label="How the solar is used" options={SCHEMES} value={values.scheme} onChange={set('scheme')} />
 
       <NumberField
         label={r.netPlus ? 'Payment per unit sold' : 'Payment per surplus unit'}
@@ -135,7 +112,6 @@ export function SolarFields({ values, results: r, set, onSize }) {
             : 'For units beyond the Day use. Enter 0 if surplus isn’t paid.'
         }
       />
-      <NumberField label="System cost" prefix="Rs." value={values.investment} onChange={set('investment')} hint="Total installed price" />
     </>
   );
 }

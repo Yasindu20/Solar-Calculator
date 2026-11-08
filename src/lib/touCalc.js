@@ -1,8 +1,7 @@
 // The time-of-use calculator: rebuilds a Day / Peak / Off-peak bill the way CEB/EDL and LECO
 // work it out, then shows what a solar system takes off it.
 //
-// Bill rules (checked against real EDL and LECO bills):
-//   units on a register = (current reading − previous reading) × meter multiplier
+// The units are typed as the bill shows them. Bill rules (checked against real EDL and LECO bills):
 //   solar export is set off against Day units only:  Day units billed = Day import − Export
 //   max demand is the month's kVA reading (not a difference) × the demand rate
 //   charges = each line rounded to the cent, plus the fixed charge
@@ -13,8 +12,8 @@ import { touSettings, findTariff } from '../config/tariffs.js';
 import { touExample } from '../config/company.js';
 import { formatTyped } from './format.js';
 
-export const ENERGY_REGISTERS = ['day', 'peak', 'offPeak'];
-export const REGISTERS = [...ENERGY_REGISTERS, 'export'];
+// Unit fields on the form: the three time-of-use periods plus export from solar already installed.
+export const UNIT_KEYS = ['day', 'peak', 'offPeak', 'export'];
 export const BILL_LINES = ['day', 'peak', 'offPeak', 'demand', 'fixed'];
 export const RATE_KEYS = ['day', 'peak', 'offPeak', 'demand', 'fixed'];
 
@@ -22,29 +21,6 @@ export const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export function isBlank(value) {
   return String(value ?? '').replace(/[^0-9.]/g, '') === '';
-}
-
-// Units on one register this month, and whether the entry is complete.
-// status: ok · empty · needs-previous · needs-current · reversed (current below previous)
-export function registerUnits(input, key) {
-  if (input.entry === 'units') {
-    const raw = input.units?.[key];
-    return { units: toNumber(raw), status: isBlank(raw) ? 'empty' : 'ok' };
-  }
-  const { prev, curr } = input.readings?.[key] ?? {};
-  const noPrev = isBlank(prev);
-  const noCurr = isBlank(curr);
-  if (noPrev && noCurr) return { units: 0, status: 'empty' };
-  if (noPrev) return { units: 0, status: 'needs-previous' };
-  if (noCurr) return { units: 0, status: 'needs-current' };
-  const diff = toNumber(curr) - toNumber(prev);
-  if (diff < 0) return { units: 0, status: 'reversed' };
-  return { units: diff * meterMultiplier(input), status: 'ok' };
-}
-
-// "Multiplied by" on CEB/EDL bills. Blank or 0 means 1.
-export function meterMultiplier(input) {
-  return toNumber(input.multiplier) || 1;
 }
 
 export function rateValues(input) {
@@ -78,11 +54,11 @@ export function generationFromSize(kwp) {
 }
 
 export function calculateTou(input) {
-  const registers = Object.fromEntries(REGISTERS.map((key) => [key, registerUnits(input, key)]));
-  const dayImport = registers.day.units;
-  const exported = registers.export.units;
-  const peakUnits = registers.peak.units;
-  const offPeakUnits = registers.offPeak.units;
+  const unitsOf = (key) => toNumber(input.units?.[key]);
+  const dayImport = unitsOf('day');
+  const exported = unitsOf('export');
+  const peakUnits = unitsOf('peak');
+  const offPeakUnits = unitsOf('offPeak');
 
   // Solar already on the roof: its export is set off against Day units only.
   const dayUnits = Math.max(0, dayImport - exported);
@@ -116,8 +92,6 @@ export function calculateTou(input) {
   const billDifference = billTotal == null ? null : round2(today.total - billTotal);
 
   return {
-    registers,
-    multiplier: meterMultiplier(input),
     dayImport,
     exported,
     dayUnits,
@@ -168,20 +142,14 @@ export function ratesMatchTariff(input) {
   return RATE_KEYS.every((key) => Math.abs(toNumber(input.rates?.[key]) - tariff.rates[key]) < 1e-9);
 }
 
-const emptyRegisters = () => Object.fromEntries(REGISTERS.map((key) => [key, '']));
-const emptyReadings = () => Object.fromEntries(REGISTERS.map((key) => [key, { prev: '', curr: '' }]));
+const emptyUnits = () => Object.fromEntries(UNIT_KEYS.map((key) => [key, '']));
 
 // The figures the time-of-use calculator opens with (see touExample in src/config/company.js).
 export function touDefaultInputs() {
   const ex = touExample;
-  const readings = emptyReadings();
-  for (const [key, [prev, curr]] of Object.entries(ex.readings)) readings[key] = { prev, curr };
   return {
     tariff: ex.tariff,
-    entry: 'readings',
-    readings,
-    units: emptyRegisters(),
-    multiplier: '1',
+    units: { ...emptyUnits(), ...ex.units },
     maxDemand: ex.maxDemand,
     rates: tariffRateFields(ex.tariff),
     sscl: true,
@@ -200,9 +168,7 @@ export function touDefaultInputs() {
 export function clearedBillInputs(current) {
   return {
     ...current,
-    readings: emptyReadings(),
-    units: emptyRegisters(),
-    multiplier: '1',
+    units: emptyUnits(),
     maxDemand: '',
     billTotal: '',
     customerName: '',

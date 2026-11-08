@@ -4,8 +4,23 @@
 
 import { colors as C } from '../../config/brand.js';
 import { company, assumptions } from '../../config/company.js';
-import { rs, rsRate, num, units, percent, rsCompact, paybackParts, paybackLong, paybackShort, tonnes } from '../format.js';
+import { touPeriods } from '../../config/tariffs.js';
+import {
+  rs,
+  rsRate,
+  num,
+  qty,
+  units,
+  percent,
+  rsCompact,
+  paybackParts,
+  paybackLong,
+  paybackShort,
+  tonnes,
+  formatTyped,
+} from '../format.js';
 import { cashScale } from '../chart.js';
+import { benefitNoun } from '../touCalc.js';
 
 const PAGE_W = 210;
 const PAGE_H = 297;
@@ -168,25 +183,35 @@ function drawEmblem(doc, p, x, y, size, ground = C.sapphire900) {
 
 // ---------------------------------------------------------------- report
 
-export function drawReport(doc, { results: r, details = {}, now = new Date(), fonts, logo }) {
+// kind: 'standard' for a bill with one units total, 'tou' for a Day / Peak / Off-peak bill.
+export function drawReport(doc, { kind = 'standard', results: r, details = {}, now = new Date(), fonts, logo }) {
   const p = pen(doc, fonts);
+  const tou = kind === 'tou';
 
   doc.setProperties({
-    title: 'Solar investment report',
+    title: tou ? 'Solar investment report (time-of-use bill)' : 'Solar investment report',
     subject: 'Solar power financial estimate',
     author: company.legalName,
     creator: `${company.name} solar calculator`,
   });
   doc.setLineJoin('round');
 
-  drawHeader(doc, p, r, details, now, logo);
-  drawTiles(doc, p, r);
+  drawHeader(doc, p, r, details, now, logo, tou);
+  drawTiles(doc, p, r, tou);
 
   let y = TILE_Y + TILE_H + 13;
-  y = drawMonthly(doc, p, r, y);
-  y = drawCashChart(doc, p, r, y + 10);
-  y = drawTotals(doc, p, r, y + 8);
-  drawNotes(doc, p, r, y + 7);
+  if (tou) {
+    y = drawTouBill(doc, p, r, y);
+    y = drawTouBenefit(doc, p, r, y + 4);
+    y = drawCashChart(doc, p, r, y + 8, 28);
+    y = drawTotals(doc, p, r, y + 4, { h: 18, noun: benefitNoun(r) });
+    drawNotes(doc, p, r, y + 5, touNote(r));
+  } else {
+    y = drawMonthly(doc, p, r, y);
+    y = drawCashChart(doc, p, r, y + 10);
+    y = drawTotals(doc, p, r, y + 8);
+    drawNotes(doc, p, r, y + 7);
+  }
   drawFooter(doc, p);
 
   return doc;
@@ -194,7 +219,7 @@ export function drawReport(doc, { results: r, details = {}, now = new Date(), fo
 
 // ---------------------------------------------------------------- header
 
-function drawHeader(doc, p, r, details, now, logo) {
+function drawHeader(doc, p, r, details, now, logo, tou) {
   p.fill(C.sapphire900);
   doc.rect(0, 0, PAGE_W, HEADER_H, 'F');
 
@@ -262,11 +287,16 @@ function drawHeader(doc, p, r, details, now, logo) {
       { text: name, font: 'semibold', size: 9.5, color: C.paper },
     ], M, 59.5);
   } else {
-    doc.text('Savings, income and payback for your rooftop solar system', M, 59.5);
+    doc.text(
+      tou ? 'Savings and payback for solar on a time-of-use electricity bill' : 'Savings, income and payback for your rooftop solar system',
+      M,
+      59.5,
+    );
   }
   const facts = [];
   if (location) facts.push(location);
   if (size) facts.push(`${size.replace(/\s*kwp?$/i, '')} kWp system`);
+  if (tou && details.tariff) facts.push(`${details.tariff} tariff`);
   if (facts.length) {
     let fx = M;
     for (const fact of facts) {
@@ -341,7 +371,7 @@ function drawHeader(doc, p, r, details, now, logo) {
 
 // ---------------------------------------------------------------- KPI tiles
 
-function drawTiles(doc, p, r) {
+function drawTiles(doc, p, r, tou) {
   const gap = 5;
   const w = (CONTENT_W - gap * 2) / 3;
   const parts = paybackParts(r.payback);
@@ -356,11 +386,17 @@ function drawTiles(doc, p, r) {
         : parts ? `Time to recover ${rs(r.investment)}` : 'The monthly benefit is below zero',
       emphasis: true,
     },
-    {
-      label: 'Monthly benefit',
-      value: rs(r.totalMonthlyIncome),
-      note: 'Bill saved plus export income',
-    },
+    tou
+      ? {
+          label: `Monthly ${benefitNoun(r)}`,
+          value: rs(r.totalMonthlyIncome),
+          note: r.netPlus ? 'Every unit sold under Net Plus' : r.soldUnits > 0 ? 'Bill saved plus surplus sold' : 'Taken off the electricity bill',
+        }
+      : {
+          label: 'Monthly benefit',
+          value: rs(r.totalMonthlyIncome),
+          note: 'Bill saved plus export income',
+        },
     {
       label: 'Annual return',
       value: r.investment > 0 ? percent(r.roi) : '—',
@@ -507,9 +543,111 @@ function drawMonthly(doc, p, r, top) {
   return Math.max(ky + 15, boxY + boxH - 4.6);
 }
 
+// ------------------------------------------------- time-of-use bill table
+
+const TOU_LINES = [
+  { key: 'day', label: touPeriods.day.label, when: touPeriods.day.window },
+  { key: 'peak', label: touPeriods.peak.label, when: touPeriods.peak.window },
+  { key: 'offPeak', label: touPeriods.offPeak.label, when: touPeriods.offPeak.window },
+  { key: 'demand', label: 'Max demand', unit: ' kVA' },
+  { key: 'fixed', label: 'Fixed charge' },
+];
+
+// The bill laid out like a CEB/EDL or LECO bill: today on the left, with solar on the right.
+function drawTouBill(doc, p, r, top) {
+  const after = r.netPlus ? 'With Net Plus' : 'With solar';
+  sectionTitle(doc, p, `Your monthly bill, today and ${r.netPlus ? 'with Net Plus' : 'with solar'}`, M, top);
+
+  // right edges of the number columns
+  const col = { rate: M + 68, u1: M + 94, a1: M + 122, u2: M + 150, a2: PAGE_W - M };
+  const rule = (y, color = C.line, w = 0.2) => {
+    p.stroke(color).width(w);
+    doc.line(M, y, PAGE_W - M, y);
+  };
+
+  let y = top + 7.6;
+  p.font('medium', 7.4).color(C.slate600);
+  doc.text('Charge', M, y);
+  doc.text('Rate (Rs.)', col.rate, y, { align: 'right' });
+  doc.text('Units', col.u1, y, { align: 'right' });
+  doc.text('Today (Rs.)', col.a1, y, { align: 'right' });
+  doc.text('Units', col.u2, y, { align: 'right' });
+  doc.text(`${after} (Rs.)`, col.a2, y, { align: 'right' });
+  rule(y + 2, C.line, 0.25);
+
+  const pitch = 5.5;
+  const row = (label, when, a, b, unit = '') => {
+    y += pitch;
+    runs(doc, p, [
+      { text: label, font: 'semibold', size: 8.4, color: C.ink, gap: when ? 1.6 : 0 },
+      ...(when ? [{ text: when, font: 'regular', size: 7.2, color: C.slate600 }] : []),
+    ], M, y);
+    p.font('regular', 8.4).color(C.ink);
+    if (a.rate != null) doc.text(formatTyped(a.rate, 2), col.rate, y, { align: 'right' });
+    if (a.quantity != null) doc.text(`${qty(a.quantity)}${unit}`, col.u1, y, { align: 'right' });
+    doc.text(num(a.amount), col.a1, y, { align: 'right' });
+    const changed = Math.abs(a.amount - b.amount) > 0.004;
+    p.font(changed ? 'semibold' : 'regular', 8.4).color(changed ? C.tea700 : C.ink);
+    if (b.quantity != null) doc.text(`${qty(b.quantity)}${unit}`, col.u2, y, { align: 'right' });
+    doc.text(num(b.amount), col.a2, y, { align: 'right' });
+    rule(y + 2);
+  };
+
+  for (const line of TOU_LINES) {
+    row(line.label, line.when, r.today.lines[line.key], r.withSolar.lines[line.key], line.unit);
+  }
+  if (r.sscl) {
+    row('SSC Levy', '2.5% of the total', { amount: r.today.levy }, { amount: r.withSolar.levy });
+  }
+
+  y += 7;
+  p.font('semibold', 9.2).color(C.sapphire900);
+  doc.text('Monthly bill', M, y);
+  p.font('display', 12.5).color(C.sapphire900);
+  doc.text(rs(r.today.total), col.a1, y, { align: 'right' });
+  p.color(r.billSaving > 0 ? C.tea700 : C.sapphire900);
+  doc.text(rs(r.withSolar.total), col.a2, y, { align: 'right' });
+
+  return y + 2;
+}
+
+// How the monthly figure adds up, with the figure itself in a dark box.
+function drawTouBenefit(doc, p, r, top) {
+  const noun = benefitNoun(r);
+  const boxW = 76;
+  const boxH = 10;
+  const bx = PAGE_W - M - boxW;
+  p.fill(C.sapphire900);
+  doc.roundedRect(bx, top, boxW, boxH, 2, 2, 'F');
+  p.font('semibold', 8.6).color(C.sapphire300);
+  doc.text(`Monthly ${noun}`, bx + 4, top + 6.3);
+  p.font('display', 13).color(C.paper);
+  doc.text(rs(r.totalMonthlyIncome), bx + boxW - 4, top + 6.7, { align: 'right' });
+
+  let text;
+  if (r.netPlus) {
+    text = `All ${units(r.soldUnits)} a month are sold at ${rsRate(r.exportRate)} under Net Plus, so the bill stays the same.`;
+  } else {
+    text = `Bill saved: ${rs(r.billSaving)}, from ${units(r.solarToDay)} of Day use replaced by solar.`;
+    if (r.soldUnits > 0) text += ` Surplus sold: ${rs(r.solarIncome)} (${units(r.soldUnits)} × ${rsRate(r.exportRate)}).`;
+    text += ' Panels only produce in daylight, so Peak and Off-peak units stay on the bill.';
+  }
+  p.font('regular', 7.8).color(C.slate600);
+  const lines = doc.splitTextToSize(text, CONTENT_W - boxW - 8);
+  doc.text(lines.slice(0, 3), M, top + 3.6, { lineHeightFactor: 1.3 });
+  return top + boxH;
+}
+
+function touNote(r) {
+  const solar = r.netPlus
+    ? `Solar generation taken as ${units(r.generation)} a month, all sold under Net Plus.`
+    : `Solar generation taken as ${units(r.generation)} a month, set off against Day units; max demand and the fixed charge stay the same.`;
+  return `Estimates from the bill figures shown, assuming the same units and rates every month with no panel ageing or tariff changes. ${solar} Results depend on weather, system performance, consumption and tariff revisions.`;
+}
+
 // ------------------------------------------------------------ cash chart
 
-function drawCashChart(doc, p, r, top) {
+function drawCashChart(doc, p, r, top, plotH = 50) {
   sectionTitle(doc, p, `Your ${r.years}-year cash position`, M, top);
   p.font('regular', 8).color(C.slate600);
   doc.text('Where you stand at the end of each year after paying for the system', M, top + 5);
@@ -535,7 +673,6 @@ function drawCashChart(doc, p, r, top) {
   const plotX = M + axisW;
   const plotW = CONTENT_W - axisW;
   const plotTop = top + 12;
-  const plotH = 50;
   const plotBottom = plotTop + plotH;
 
   const { lo, hi, ticks } = cashScale(values);
@@ -627,15 +764,14 @@ function drawCashChart(doc, p, r, top) {
 
 // --------------------------------------------------------- income totals
 
-function drawTotals(doc, p, r, top) {
-  const h = 20;
+function drawTotals(doc, p, r, top, { h = 20, noun = 'income' } = {}) {
   p.fill(C.mist);
   doc.roundedRect(M, top, CONTENT_W, h, 2.6, 2.6, 'F');
 
   const cells = [
-    { label: '1-year income', value: rs(r.yearIncome) },
-    { label: '10-year income', value: rs(r.year10Income) },
-    { label: `${r.years}-year income`, value: rs(r.year20Income) },
+    { label: `1-year ${noun}`, value: rs(r.yearIncome) },
+    { label: `10-year ${noun}`, value: rs(r.year10Income) },
+    { label: `${r.years}-year ${noun}`, value: rs(r.year20Income) },
     { label: `${r.years}-year net gain`, value: rs(r.netGain), note: 'after the system cost', strong: true },
   ];
   const cw = CONTENT_W / cells.length;
@@ -646,18 +782,18 @@ function drawTotals(doc, p, r, top) {
       doc.line(M + cw * i, top + 4, M + cw * i, top + h - 4);
     }
     p.font('medium', 8).color(C.slate600);
-    doc.text(cell.label, x, top + 7);
+    doc.text(cell.label, x, top + h * 0.35);
     const color = cell.strong ? (r.netGain >= 0 ? C.tea600 : C.thambili600) : C.sapphire900;
     const size = fitSize(doc, p, 'display', cell.value, 14.5, cw - 9, 10);
     p.font('display', size).color(color);
-    doc.text(cell.value, x, top + 14.6);
+    doc.text(cell.value, x, top + h * 0.73);
   });
   return top + h;
 }
 
 // ------------------------------------------------- clean energy + notes
 
-function drawNotes(doc, p, r, top) {
+function drawNotes(doc, p, r, top, note = null) {
   let y = top;
   if (assumptions.showCleanEnergy && r.generation > 0) {
     // leaf: two arcs meeting at the tips
@@ -688,11 +824,12 @@ function drawNotes(doc, p, r, top) {
     y += 7;
   }
 
-  const note = `Estimates based on the figures shown, assuming they stay the same every month with no panel ageing or tariff changes. Actual results depend on weather, system performance, consumption and CEB/LECO tariff revisions.${
-    assumptions.showCleanEnergy ? ` Clean-energy figure uses ${assumptions.co2KgPerUnit} kg per unit generated.` : ''
-  }`;
+  const text = `${
+    note ??
+    'Estimates based on the figures shown, assuming they stay the same every month with no panel ageing or tariff changes. Actual results depend on weather, system performance, consumption and CEB/LECO tariff revisions.'
+  }${assumptions.showCleanEnergy ? ` Clean-energy figure uses ${assumptions.co2KgPerUnit} kg per unit generated.` : ''}`;
   p.font('regular', 7).color(C.slate600);
-  const lines = doc.splitTextToSize(note, CONTENT_W);
+  const lines = doc.splitTextToSize(text, CONTENT_W);
   doc.text(lines, M, y, { lineHeightFactor: 1.35 });
 }
 

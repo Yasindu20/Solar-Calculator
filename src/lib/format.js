@@ -15,6 +15,17 @@ export function rsRate(amount) {
   return `Rs. ${twoDp.format(amount)}`;
 }
 
+// Rs. 4,404,371.28 — to the cent, as printed on a bill
+export function rsExact(amount) {
+  const sign = amount < 0 ? MINUS : '';
+  return `${sign}Rs. ${twoDp.format(Math.abs(amount))}`;
+}
+
+// 8,000 · 12.5 — a quantity of units or kVA, up to two decimals
+export function qty(n) {
+  return (n < 0 ? MINUS : '') + upTo2.format(Math.abs(n));
+}
+
 export function num(n) {
   const rounded = Math.round(n);
   return (rounded < 0 ? MINUS : '') + whole.format(Math.abs(rounded));

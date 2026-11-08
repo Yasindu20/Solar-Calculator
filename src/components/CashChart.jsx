@@ -203,24 +203,33 @@ export function CashChart({ results }) {
   );
 }
 
+// With year-by-year figures (time-of-use calculator) the middle column is that year's net saving,
+// after maintenance and any battery replacement; otherwise it is the benefit to date.
 export function CashTable({ results }) {
+  const yearly = results.yearly;
   return (
     <table className="year-table">
       <thead>
         <tr>
           <th scope="col">Year</th>
-          <th scope="col">Benefit to date</th>
+          <th scope="col">{yearly ? 'Net saving that year' : 'Benefit to date'}</th>
           <th scope="col">Position after system cost</th>
         </tr>
       </thead>
       <tbody>
-        {results.cumulative.map((v, i) => (
-          <tr key={i}>
-            <th scope="row">{i === 0 ? 'Now' : i}</th>
-            <td>{rs(results.yearIncome * i)}</td>
-            <td className={v >= 0 ? 'is-ahead' : undefined}>{rs(v)}</td>
-          </tr>
-        ))}
+        {results.cumulative.map((v, i) => {
+          const row = yearly && i > 0 ? yearly[i - 1] : null;
+          return (
+            <tr key={i}>
+              <th scope="row">{i === 0 ? 'Now' : i}</th>
+              <td>
+                {yearly ? (i === 0 ? '—' : rs(row.net)) : rs(results.yearIncome * i)}
+                {row?.replacement > 0 && <small> after battery replacement</small>}
+              </td>
+              <td className={v >= 0 ? 'is-ahead' : undefined}>{rs(v)}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

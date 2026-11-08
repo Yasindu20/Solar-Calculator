@@ -80,11 +80,11 @@ export function MonthlyBenefit({ results: r }) {
   );
 }
 
-export function IncomeTotals({ results: r }) {
+export function IncomeTotals({ results: r, noun = 'income' }) {
   const cells = [
-    { label: '1-year income', value: r.yearIncome },
-    { label: '10-year income', value: r.year10Income },
-    { label: `${r.years}-year income`, value: r.year20Income },
+    { label: `1-year ${noun}`, value: r.yearIncome },
+    { label: `10-year ${noun}`, value: r.year10Income },
+    { label: `${r.years}-year ${noun}`, value: r.year20Income },
     { label: `${r.years}-year net gain`, value: r.netGain, note: 'After the system cost', gain: true },
   ];
   return (

@@ -94,9 +94,10 @@ async function loadLogo() {
   }
 }
 
-export async function downloadReport({ results, details, now = new Date() }) {
+// kind: 'standard' (one units total) or 'tou' (Day / Peak / Off-peak bill)
+export async function downloadReport({ kind = 'standard', results, details, now = new Date() }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   const [fonts, logo] = await Promise.all([registerFonts(doc), loadLogo()]);
-  drawReport(doc, { results, details, now, fonts, logo });
+  drawReport(doc, { kind, results, details, now, fonts, logo });
   doc.save(reportFileName(details, now));
 }

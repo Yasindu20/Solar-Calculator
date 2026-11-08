@@ -15,9 +15,11 @@ export const colors = {
 
   thambili500: '#F5A021',
   thambili600: '#DD7410',
+  thambili800: '#9C4F06', // orange for small text: warnings
   thambili100: '#FDEBD0',
 
   tea600: '#1D8A5A',
+  tea700: '#17734B', // green for small text: amounts that drop with solar
   tea100: '#E2F3EA',
 
   ink: '#18233F',

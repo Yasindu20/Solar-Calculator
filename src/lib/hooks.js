@@ -56,6 +56,25 @@ export function useElementWidth() {
   return [ref, width];
 }
 
+// Builds and saves the PDF. jsPDF and the fonts only download on the first click.
+// getReport returns what downloadReport needs: { kind, results, details }.
+export function useReportDownload(getReport) {
+  const [status, setStatus] = useState('idle');
+  async function download() {
+    if (status === 'working') return;
+    setStatus('working');
+    try {
+      const { downloadReport } = await import('./pdf/exportReport.js');
+      await downloadReport(getReport());
+      setStatus('idle');
+    } catch (err) {
+      console.error(err);
+      setStatus('error');
+    }
+  }
+  return { download, busy: status === 'working', failed: status === 'error' };
+}
+
 export function useInView(ref) {
   const [inView, setInView] = useState(true);
   useEffect(() => {

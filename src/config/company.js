@@ -32,7 +32,23 @@ export const assumptions = {
   showCleanEnergy: true,
 };
 
-// The figures the calculator opens with (same as the previous calculator).
+// The figures the time-of-use calculator opens with: a made-up GP-2 business using
+// 8,000 Day, 6,000 Peak and 3,000 Off-peak units a month. Rates come from the tariff
+// (src/config/tariffs.js) and generation from the system size.
+export const touExample = {
+  tariff: 'GP-2',
+  // [previous reading, current reading]
+  readings: {
+    day: ['245,180', '253,180'],
+    peak: ['98,420', '104,420'],
+    offPeak: ['51,300', '54,300'],
+  },
+  maxDemand: '100',
+  systemSize: '50',
+  investment: '7,500,000',
+};
+
+// The figures the standard calculator opens with (same as the previous calculator).
 export const defaultInputs = {
   generation: '533',
   usage: '465',

@@ -15,28 +15,18 @@ export function splitPayback(months) {
   return { years: Math.floor(total / 12), months: total % 12, exactMonths: months };
 }
 
-// The calculation is the same as the original calculator:
-//   surplus units × unit value + the light bill no longer paid = monthly benefit,
-// with 1, 10 and 20-year totals, annual ROI and payback built from it.
-export function calculate(input) {
-  const generation = toNumber(input.generation);
-  const usage = toNumber(input.usage);
-  const unitValue = toNumber(input.unitValue);
-  const lightBill = toNumber(input.lightBill);
-  const investment = toNumber(input.investment);
-
-  const unitBalance = generation - usage; // surplus (+) or shortfall (−) in units
-  const monthlyUnitIncome = unitBalance * unitValue;
-  const totalMonthlyIncome = lightBill + monthlyUnitIncome;
-  const yearIncome = totalMonthlyIncome * 12;
-  const year10Income = totalMonthlyIncome * 120;
-  const year20Income = totalMonthlyIncome * 240;
+// Everything that follows from a steady monthly benefit: 1, 10 and 20-year totals, annual ROI,
+// payback, the yearly cash position and the clean-energy estimate. Shared by both calculators.
+export function projection({ monthlyBenefit, investment, generation }) {
+  const yearIncome = monthlyBenefit * 12;
+  const year10Income = monthlyBenefit * 120;
+  const year20Income = monthlyBenefit * 240;
 
   const roi = investment > 0 ? (yearIncome / investment) * 100 : 0;
 
   // null when there is no system cost to recover, or the benefit never recovers it.
   const hasCost = investment > 0;
-  const paybackMonths = hasCost && totalMonthlyIncome > 0 ? investment / totalMonthlyIncome : null;
+  const paybackMonths = hasCost && monthlyBenefit > 0 ? investment / monthlyBenefit : null;
 
   const years = assumptions.projectionYears;
   // Where the customer stands at the end of each year, after paying for the system.
@@ -50,13 +40,8 @@ export function calculate(input) {
 
   return {
     generation,
-    usage,
-    unitValue,
-    lightBill,
     investment,
-    unitBalance,
-    monthlyUnitIncome,
-    totalMonthlyIncome,
+    totalMonthlyIncome: monthlyBenefit,
     yearIncome,
     year10Income,
     year20Income,
@@ -72,5 +57,29 @@ export function calculate(input) {
     co2PerYearKg,
     co2TotalKg,
     treesEquivalent,
+  };
+}
+
+// The standard-bill calculation is the same as the original calculator:
+//   surplus units × unit value + the light bill no longer paid = monthly benefit,
+// with 1, 10 and 20-year totals, annual ROI and payback built from it.
+export function calculate(input) {
+  const generation = toNumber(input.generation);
+  const usage = toNumber(input.usage);
+  const unitValue = toNumber(input.unitValue);
+  const lightBill = toNumber(input.lightBill);
+  const investment = toNumber(input.investment);
+
+  const unitBalance = generation - usage; // surplus (+) or shortfall (−) in units
+  const monthlyUnitIncome = unitBalance * unitValue;
+  const totalMonthlyIncome = lightBill + monthlyUnitIncome;
+
+  return {
+    usage,
+    unitValue,
+    lightBill,
+    unitBalance,
+    monthlyUnitIncome,
+    ...projection({ monthlyBenefit: totalMonthlyIncome, investment, generation }),
   };
 }

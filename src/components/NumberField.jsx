@@ -11,7 +11,23 @@ function sanitize(text, allowDecimals) {
   return cleaned;
 }
 
-export function NumberField({ label, hint, prefix, suffix, value, onChange, decimals = 0, placeholder, optional }) {
+// A bare number input: cleans what is typed and adds thousands separators when it loses focus.
+export function NumberInput({ value, onChange, decimals = 0, inputRef, ...rest }) {
+  return (
+    <input
+      ref={inputRef}
+      inputMode="decimal"
+      autoComplete="off"
+      spellCheck="false"
+      value={value}
+      onChange={(e) => onChange(sanitize(e.target.value, decimals !== 0))}
+      onBlur={() => onChange(formatTyped(value, decimals))}
+      {...rest}
+    />
+  );
+}
+
+export function NumberField({ label, hint, prefix, suffix, value, onChange, decimals = 0, placeholder, optional, children }) {
   const id = useId();
   const inputRef = useRef(null);
   const hintId = hint ? `${id}-hint` : undefined;
@@ -23,17 +39,14 @@ export function NumberField({ label, hint, prefix, suffix, value, onChange, deci
       </label>
       <div className="control" onClick={() => inputRef.current?.focus()}>
         {prefix && <span className="affix">{prefix}</span>}
-        <input
-          ref={inputRef}
+        <NumberInput
+          inputRef={inputRef}
           id={id}
-          inputMode="decimal"
-          autoComplete="off"
-          spellCheck="false"
           value={value}
+          onChange={onChange}
+          decimals={decimals}
           placeholder={placeholder}
           aria-describedby={hintId}
-          onChange={(e) => onChange(sanitize(e.target.value, decimals !== 0))}
-          onBlur={() => onChange(formatTyped(value, decimals))}
         />
         {suffix && <span className="affix">{suffix}</span>}
       </div>
@@ -42,6 +55,7 @@ export function NumberField({ label, hint, prefix, suffix, value, onChange, deci
           {hint}
         </p>
       )}
+      {children}
     </div>
   );
 }

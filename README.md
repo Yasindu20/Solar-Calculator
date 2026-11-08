@@ -30,8 +30,9 @@ One fix: a payback such as 35.6 months now shows as "3 years" instead of "2 year
 
 ## Time-of-use bill
 
-The figures are typed straight from the customer's bill, in the bill's own order and wording. The calculator rebuilds
-the bill line by line, then shows what solar takes off it.
+The figures are typed straight from the customer's bill, in the bill's own order and wording. One table holds every
+charge: Day, Peak, Off-peak, Max demand, Fixed charge and Export (only when solar is already installed), each with its
+rate box beside its units box. The calculator rebuilds the bill line by line, then shows what solar takes off it.
 
 ### How the bill is worked out
 
@@ -39,7 +40,7 @@ These rules reproduce real EDL (formerly CEB) and LECO bills to the cent — see
 
 | Line | Rule |
 | --- | --- |
-| Units on a register | (current reading − previous reading) × meter multiplier |
+| Units | as printed on the bill (the units charged, after any "Multiplied by") |
 | Day units billed | Day units − Export units (export from solar already on the roof is set off against Day units only) |
 | Day, Peak, Off-peak charges | units × rate, each rounded to the cent |
 | Max demand | the month's kVA reading × rate per kVA (it is a reading, not a difference) |
@@ -49,11 +50,10 @@ These rules reproduce real EDL (formerly CEB) and LECO bills to the cent — see
 
 ### Worked out as you type
 
-- **Units** from each pair of meter readings (or type the units directly with **Units only**).
 - **Day units billed** after export, **night-time units** (Peak + Off-peak, which solar can't cover) and the
   **total units** for the month.
-- **Rates** fill in from the tariff picked; any rate can be changed to match the bill, with a link back to the tariff
-  rates.
+- **Rates** fill in from the tariff picked, beside the units they apply to; any rate can be changed to match the bill,
+  with a link back to the tariff rates.
 - **Check against the bill** (optional): type the bill's total and the calculator confirms it matches, or says by how
   much it differs and what to check. A bill split into two consumption periods (a tariff change mid-month) is flagged
   this way, because the calculator prices the whole month at one set of rates.

@@ -9,15 +9,14 @@ import {
   generationFromSize,
   isBlank,
   benefitNoun,
-  REGISTERS,
 } from '../lib/touCalc.js';
 import { formatTyped, rs, percent } from '../lib/format.js';
 import { useInView, useReportDownload } from '../lib/hooks.js';
-import { NumberField, TextField } from '../components/NumberField.jsx';
+import { TextField } from '../components/NumberField.jsx';
 import { ResultPanel, MobileBar } from '../components/ResultPanel.jsx';
 import { IncomeTotals, CleanEnergy } from '../components/Details.jsx';
-import { EntrySwitch, MeterTable, MeterSummary } from '../components/tou/MeterReadings.jsx';
-import { TariffField, RateFields, BillCheck } from '../components/tou/RateFields.jsx';
+import { ChargesTable, UnitsSummary } from '../components/tou/ChargesTable.jsx';
+import { TariffField, RatesNote, SsclCheck, BillCheck } from '../components/tou/BillFields.jsx';
 import { SolarFields } from '../components/tou/SolarFields.jsx';
 import { BillTable, TouBenefit, UnitsByTime } from '../components/tou/BillDetails.jsx';
 import { CashBlock } from './StandardCalculator.jsx';
@@ -43,8 +42,6 @@ export function TouCalculator({ values, setValues }) {
 
   const update = (fn) => setValues((prev) => ({ ...prev, ...fn(prev) }));
   const set = (name) => (value) => update(() => ({ [name]: value }));
-  const onReading = (key, which) => (value) =>
-    update((prev) => ({ readings: { ...prev.readings, [key]: { ...prev.readings[key], [which]: value } } }));
   const onUnits = (key) => (value) => update((prev) => ({ units: { ...prev.units, [key]: value } }));
   const onRate = (key) => (value) => update((prev) => ({ rates: { ...prev.rates, [key]: value } }));
 
@@ -57,18 +54,6 @@ export function TouCalculator({ values, setValues }) {
       const changed = toNumber(value) !== toNumber(prev.systemSize) || isBlank(value) !== isBlank(prev.systemSize);
       if (!changed || isBlank(value)) return { systemSize: value };
       return { systemSize: value, generation: formatTyped(generationFromSize(toNumber(value)), 0) };
-    });
-
-  // Switching to "Units only" carries the units worked out from the readings across.
-  const switchEntry = (entry) =>
-    update((prev) => {
-      if (prev.entry === entry) return {};
-      if (entry === 'readings') return { entry };
-      const worked = calculateTou(prev).registers;
-      const unitsFields = Object.fromEntries(
-        REGISTERS.map((key) => [key, worked[key].status === 'ok' ? formatTyped(worked[key].units, 'auto') : prev.units[key]]),
-      );
-      return { entry, units: unitsFields };
     });
 
   const noun = benefitNoun(r);
@@ -90,37 +75,10 @@ export function TouCalculator({ values, setValues }) {
           <fieldset>
             <legend>The bill</legend>
             <TariffField value={values.tariff} onChange={chooseTariff} />
-          </fieldset>
-
-          <fieldset>
-            <legend>Meter readings</legend>
-            <EntrySwitch value={values.entry} onChange={switchEntry} />
-            <MeterTable values={values} results={r} onReading={onReading} onUnits={onUnits} />
-            <MeterSummary results={r} />
-            <div className={values.entry === 'readings' ? 'field-pair field-pair-even' : undefined}>
-              <NumberField
-                label="Max demand"
-                suffix="kVA"
-                decimals="auto"
-                value={values.maxDemand}
-                onChange={set('maxDemand')}
-                hint="This month’s kVA reading on the bill"
-              />
-              {values.entry === 'readings' && (
-                <NumberField
-                  label="Meter multiplier"
-                  decimals="auto"
-                  value={values.multiplier}
-                  onChange={set('multiplier')}
-                  hint="“Multiplied by” on CEB/EDL bills. Usually 1."
-                />
-              )}
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend>Rates</legend>
-            <RateFields values={values} onRate={onRate} onRestore={restoreRates} onSscl={set('sscl')} />
+            <RatesNote values={values} onRestore={restoreRates} />
+            <ChargesTable values={values} onRate={onRate} onUnits={onUnits} onMaxDemand={set('maxDemand')} />
+            <UnitsSummary results={r} />
+            <SsclCheck checked={values.sscl} onChange={set('sscl')} />
             <BillCheck value={values.billTotal} onChange={set('billTotal')} results={r} />
           </fieldset>
 
@@ -149,8 +107,8 @@ export function TouCalculator({ values, setValues }) {
             { label: 'Annual return', value: r.hasCost && !billEmpty ? percent(r.roi) : '—' },
             { label: `${r.years}-year net gain`, value: billEmpty ? '—' : rs(r.netGain) },
           ]}
-          noBenefitNote="There’s no saving with these figures. Check the readings and the solar system."
-          empty={billEmpty ? { headline: 'Enter the bill figures', note: 'Type the meter readings or units from the bill to see the saving.' } : null}
+          noBenefitNote="There’s no saving with these figures. Check the units and the solar system."
+          empty={billEmpty ? { headline: 'Enter the bill figures', note: 'Type the units from the bill to see the saving.' } : null}
           onDownload={download}
           busy={busy}
           failed={failed}

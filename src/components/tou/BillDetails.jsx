@@ -30,7 +30,7 @@ export function BillTable({ results: r }) {
           return (
             <tr key={key}>
               <th scope="row">
-                {label}
+                <span className="bill-name">{label}</span>
                 {when && <span className="bill-when"> {when}</span>}
                 {a.rate != null && (
                   <small>

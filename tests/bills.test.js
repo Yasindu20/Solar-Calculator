@@ -7,7 +7,6 @@ import { defaultInputs } from '../src/config/company.js';
 import {
   calculateTou,
   monthlyBill,
-  registerUnits,
   touDefaultInputs,
   clearedBillInputs,
   tariffRateFields,
@@ -19,10 +18,9 @@ const close = (actual, expected, cents = 0.005) =>
 
 const rates = (day, peak, offPeak, demand, fixed) => ({ day, peak, offPeak, demand, fixed });
 
-const readingsInput = (readings, extra) => ({
-  entry: 'readings',
-  readings: { export: { prev: '', curr: '' }, ...readings },
-  multiplier: '1',
+// Units typed exactly as the bill prints them.
+const billInput = (units, extra) => ({
+  units: { export: '', ...units },
   sscl: true,
   scheme: 'onsite',
   generation: '0',
@@ -31,12 +29,8 @@ const readingsInput = (readings, extra) => ({
 
 test('EDL (formerly CEB) industrial I-2 bill, October 2026 — reproduced to the cent', () => {
   const r = calculateTou(
-    readingsInput(
-      {
-        day: { prev: '1,389,375', curr: '1,495,478' },
-        peak: { prev: '236,602', curr: '261,290' },
-        offPeak: { prev: '112,225', curr: '131,687' },
-      },
+    billInput(
+      { day: '106,103', peak: '24,688', offPeak: '19,462' },
       { maxDemand: '599', rates: tariffRateFields('I-2'), billTotal: '4,404,371.28' },
     ),
   );
@@ -56,13 +50,9 @@ test('EDL (formerly CEB) industrial I-2 bill, October 2026 — reproduced to the
 
 test('LECO GP-2 bill with solar export, February 2026 — export set off against Day units', () => {
   const r = calculateTou(
-    readingsInput(
-      {
-        day: { prev: '282,674', curr: '288,691' },
-        peak: { prev: '95,563', curr: '101,156' },
-        offPeak: { prev: '49,029', curr: '51,741' },
-        export: { prev: '27,697', curr: '32,703' },
-      },
+    billInput(
+      // "Total Units for the Month" row
+      { day: '6,017', peak: '5,593', offPeak: '2,712', export: '5,006' },
       // the rates in force in February 2026
       { maxDemand: '78', rates: rates('41', '47', '31', '1,500', '5,000') },
     ),
@@ -100,15 +90,10 @@ test('LECO GP-2 bill, May 2026 — both tariff periods match the bill lines', ()
   close(before.charges + after.charges, 948988.4, 0.03); // bill rounds the split fixed charge 2 cents differently
 });
 
-test('the same May 2026 readings at today’s GP-2 rates flag a difference from the split bill', () => {
+test('the same May 2026 units at today’s GP-2 rates flag a difference from the split bill', () => {
   const r = calculateTou(
-    readingsInput(
-      {
-        day: { prev: '301,536', curr: '309,287' },
-        peak: { prev: '114,238', curr: '120,885' },
-        offPeak: { prev: '58,193', curr: '61,640' },
-        export: { prev: '46,657', curr: '51,505' },
-      },
+    billInput(
+      { day: '7,751', peak: '6,647', offPeak: '3,447', export: '4,848' },
       { maxDemand: '105', rates: tariffRateFields('GP-2'), billTotal: '973,321.44' },
     ),
   );
@@ -116,26 +101,6 @@ test('the same May 2026 readings at today’s GP-2 rates flag a difference from 
   assert.equal(r.totalUnits, 12997);
   assert.equal(r.today.charges, 999399);
   assert.ok(r.billDifference > 1, 'a whole month at the new rates costs more than the split bill');
-});
-
-test('typing units gives the same bill as typing readings', () => {
-  const base = { maxDemand: '78', rates: rates('41', '47', '31', '1,500', '5,000'), sscl: true, scheme: 'onsite' };
-  const fromUnits = calculateTou({
-    ...base,
-    entry: 'units',
-    units: { day: '6,017', peak: '5,593', offPeak: '2,712', export: '5,006' },
-  });
-  close(fromUnits.today.total, 523481.03);
-});
-
-test('meter multiplier and reading problems', () => {
-  const input = (prev, curr, multiplier = '1') => ({ entry: 'readings', multiplier, readings: { day: { prev, curr } } });
-  assert.deepEqual(registerUnits(input('100', '250', '40'), 'day'), { units: 6000, status: 'ok' });
-  assert.deepEqual(registerUnits(input('100', '250', ''), 'day'), { units: 150, status: 'ok' });
-  assert.equal(registerUnits(input('250', '100'), 'day').status, 'reversed');
-  assert.equal(registerUnits(input('', '100'), 'day').status, 'needs-previous');
-  assert.equal(registerUnits(input('100', ''), 'day').status, 'needs-current');
-  assert.equal(registerUnits(input('', ''), 'day').status, 'empty');
 });
 
 test('solar used on site replaces Day units only, and the levy falls with it', () => {
@@ -181,7 +146,7 @@ test('rates edited away from the tariff are noticed; clearing keeps the tariff a
   assert.ok(ratesMatchTariff(ex));
   assert.ok(!ratesMatchTariff({ ...ex, rates: { ...ex.rates, day: '52.00' } }));
   const cleared = clearedBillInputs(ex);
-  assert.equal(cleared.readings.day.prev, '');
+  assert.equal(cleared.units.day, '');
   assert.equal(cleared.maxDemand, '');
   assert.deepEqual(cleared.rates, ex.rates);
   assert.equal(cleared.systemSize, ex.systemSize);
